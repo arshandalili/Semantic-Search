@@ -49,7 +49,7 @@ def init_models():
     global CORPUS, CORPUS_EMBEDDING, MODEL
     
     # Load model
-    MODEL = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2') # sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    MODEL = SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2') # sentence-transformers/all-MiniLM-L6-v2
 
     # Load dataset and mini-datasets
     CORPUS = pd.read_csv('semantic/data/test.csv')
