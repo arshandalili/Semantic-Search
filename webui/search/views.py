@@ -6,6 +6,7 @@ from pathlib import Path
 from drf_yasg import openapi
 from .models import CorpusEntry
 from django.db.models import Q
+from django.db.models import F
 from faiss import write_index, read_index
 from rest_framework import viewsets
 from django.shortcuts import render
@@ -17,7 +18,7 @@ from sentence_transformers import SentenceTransformer, util
 
 MODEL = None
 INDEX = None
-INDEX_PATH = 'search/data/data.index'
+INDEX_PATH = 'search/data/index.faiss'
 
 class CorpusEntryViewSet(viewsets.ViewSet):
     serializer_class = CorpusEntrySerializer
@@ -45,7 +46,7 @@ class CorpusEntryViewSet(viewsets.ViewSet):
         k = request.query_params.get('k', 5)
         query_embedding = MODEL.encode([query]).astype('float32')
         D, I = INDEX.search(query_embedding, int(k))
-        queryset = CorpusEntry.objects.filter(Q(id__in=I[0]))
+        queryset = CorpusEntry.objects.filter(Q(index__in=I[0]))
         serializer = CorpusEntrySerializer(queryset, many=True)
         return Response(serializer.data)
 
@@ -64,7 +65,7 @@ class CorpusEntryViewSet(viewsets.ViewSet):
         query = request.query_params.get('q', '')
         query_embedding = MODEL.encode([query]).astype('float32')
         INDEX.add(query_embedding)
-        new_entry = CorpusEntry.objects.create(text=query)
+        new_entry = CorpusEntry.objects.create(index=INDEX.ntotal, text=query)
         new_entry.save()
         serializer = CorpusEntrySerializer(new_entry)
         sync_index()
@@ -85,7 +86,9 @@ class CorpusEntryViewSet(viewsets.ViewSet):
     def delete_entry(self, request):
         index = request.query_params.get('id', '')
         INDEX.remove_ids(np.array([int(index)]))
-        CorpusEntry.objects.filter(id=int(index)).delete()
+        # decrement index of all entries with index > index
+        CorpusEntry.objects.filter(index=int(index)).delete()
+        CorpusEntry.objects.filter(index__gt=int(index)).update(index=F('index') - 1)
         sync_index()
         return Response({'message': f'Entry with index {index} deleted successfully.'})
 
@@ -93,7 +96,7 @@ class CorpusEntryViewSet(viewsets.ViewSet):
 def init_models():
     global MODEL, INDEX
     
-    MODEL = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2') #  sentence-transformers/LaBSE sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    MODEL = SentenceTransformer('sentence-transformers/LaBSE') #  sentence-transformers/all-MiniLM-L6-v2 sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
     
     if Path(INDEX_PATH).is_file():
         print('Loading existing index...')
@@ -103,7 +106,7 @@ def init_models():
         CORPUS = pd.read_csv('search/data/test.csv')
         CORPUS_EMBEDDING = MODEL.encode(CORPUS['Original Sentence'].to_list()).astype('float32')
         for i in range(len(CORPUS)):
-            new_entry = CorpusEntry.objects.create(text=CORPUS['Original Sentence'][i])
+            new_entry = CorpusEntry.objects.create(index=i, text=CORPUS['Original Sentence'][i])
             new_entry.save()
         
         INDEX = faiss.IndexFlatIP(CORPUS_EMBEDDING.shape[1])
